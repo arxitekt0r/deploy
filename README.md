@@ -1,0 +1,2 @@
+# deploy
+deploy_backend_for_synergy_chat_app
