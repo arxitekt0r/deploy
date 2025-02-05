@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 python -m venv venv
 venv\Scripts\activate
 # Install dependencies (if not already installed by Render)
