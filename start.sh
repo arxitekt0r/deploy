@@ -1,6 +1,4 @@
-#!/usr/bin/env bash
-python -m venv venv
-venv\Scripts\activate
+#!/usr/bin/bash
 # Install dependencies (if not already installed by Render)
 pip install -r requirements.txt
 # Run the FastAPI app with uvicorn
