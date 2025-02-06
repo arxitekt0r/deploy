@@ -15,15 +15,10 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-smtp_server = os.getenv("SMTP_SERVER")
-smtp_port = int(os.getenv("SMTP_PORT"))
-sender_email = os.getenv("SENDER_EMAIL")
-password = os.getenv("SENDER_PASSWORD")
-
 smtp_server = "smtp.gmail.com"
 smtp_port = 587
-sender_email = os.getenv("SMTP_EMAIL")
-password = os.getenv("SMTP_PASSWORD")
+sender_email = os.getenv("SENDER_EMAIL")
+password = os.getenv("SENDER_PASSWORD")
 
 verification_db = {}
 
