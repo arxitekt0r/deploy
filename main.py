@@ -164,16 +164,37 @@ def delete_user(user_id: str, db: Session = Depends(get_db)):
 
 @app.post("/addcontact/{user_id}/{contact_nickname}")
 def add_contact(user_id: str, contact_nickname: str, db: Session = Depends(get_db)):
+    # Find the user adding the contact
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    contacts = json.loads(user.contacts)
-    if contact_nickname in contacts:
-        raise HTTPException(status_code=400, detail="Contact already exists")
-    contacts.append(contact_nickname)
-    user.contacts = json.dumps(contacts)
+
+    # Find the contact user by their nickname
+    contact_user = db.query(UserDB).filter(UserDB.nickname == contact_nickname).first()
+    if not contact_user:
+        raise HTTPException(status_code=404, detail="Contact user not found")
+
+    # Prevent adding self as a contact
+    if user.nickname == contact_nickname:
+        raise HTTPException(status_code=400, detail="You cannot add yourself as a contact")
+
+    # Update user's contacts
+    user_contacts = json.loads(user.contacts)
+    if contact_nickname not in user_contacts:
+        user_contacts.append(contact_nickname)
+        user.contacts = json.dumps(user_contacts)
+
+    # Update contact's contacts (add the user)
+    contact_user_contacts = json.loads(contact_user.contacts)
+    if user.nickname not in contact_user_contacts:
+        contact_user_contacts.append(user.nickname)
+        contact_user.contacts = json.dumps(contact_user_contacts)
+
+    # Commit the changes
     db.commit()
-    return {"message": "Contact added successfully"}
+    
+    return {"message": "Contact added successfully to both users"}
+
 
 
 @app.post("/sendMessage/{user_id}/{contact_nickname}")
