@@ -259,19 +259,20 @@ def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)
 
     # Query for other users whose nickname starts with the search string (case-insensitive)
     # and who are not the current user and not already in contacts.
-    other_users_query = db.query(UserDB).filter(
+    other_users_query = db.query(UserDB.nickname).filter(  # Select only nickname
         UserDB.nickname.ilike(f"{search_string}%"),
         UserDB.id != user_id
     )
     # Exclude users that are already in the contacts list.
     if contacts_list:
         other_users_query = other_users_query.filter(~UserDB.nickname.in_(contacts_list))
-    matched_other_users = other_users_query.all()
 
-    # Use the Pydantic model for serialization (UserResponse)
+    # Extract nicknames only
+    matched_other_users = [user.nickname for user in other_users_query.all()]
+
     return {
         "matched_contacts": matched_contacts,
-        "matched_other_users": matched_other_users
+        "matched_other_users": matched_other_users  # Now returns only nicknames
     }
 
 
