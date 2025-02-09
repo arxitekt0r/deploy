@@ -1,3 +1,4 @@
+
 import random
 
 from fastapi import FastAPI, HTTPException, Depends
@@ -13,6 +14,7 @@ import json
 import os
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 smtp_server = "smtp.gmail.com"
@@ -95,6 +97,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 class Message(BaseModel):
     sender: str
@@ -192,9 +195,8 @@ def add_contact(user_id: str, contact_nickname: str, db: Session = Depends(get_d
 
     # Commit the changes
     db.commit()
-    
-    return {"message": "Contact added successfully to both users"}
 
+    return {"message": "Contact added successfully to both users"}
 
 
 @app.post("/sendMessage/{user_id}/{contact_nickname}")
@@ -206,7 +208,9 @@ def send_message(user_id: str, contact_nickname: str, message: Message, db: Sess
     if contact_nickname not in contacts:
         raise HTTPException(status_code=400, detail="Contact not found")
 
-    file_path = f"conversations/{user.nickname}_{contact_nickname}.json"
+    a, b = sorted([user.nickname, contact_nickname])
+
+    file_path = f"conversations/{a}_{b}.json"
     os.makedirs("conversations", exist_ok=True)
 
     conversation = []
@@ -270,14 +274,42 @@ def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)
         "matched_other_users": matched_other_users
     }
 
+
 @app.get("/getContactInfo/{user_id}/{nickname}")
 def get_contact_info(user_id: str, nickname: str, db: Session = Depends(get_db)):
     current_user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not current_user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     user = db.query(UserDB).filter(UserDB.nickname == nickname).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return {"name": user.name, "surname": user.surname, "nickname": user.nickname}
+
+
+@app.get("/getMessageHistory/{user_id}/{contact_nickname}")
+def get_message_history(user_id: str, contact_nickname: str, db: Session = Depends(get_db)):
+    # Retrieve the current user from the database
+    user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        contacts_list = json.loads(user.contacts)
+    except json.JSONDecodeError:
+        contacts_list = []
+    if contact_nickname not in contacts_list:
+        raise HTTPException(status_code=400, detail="Contact not found in your contacts")
+
+    a, b = sorted([user.nickname, contact_nickname])
+    file_path = f"conversations/{a}_{b}.json"
+    os.makedirs("conversations", exist_ok=True)
+
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            conversation = json.load(f)
+    else:
+        conversation = []
+
+    return {"conversation": conversation}
