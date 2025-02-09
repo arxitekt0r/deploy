@@ -248,3 +248,15 @@ def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)
         "matched_contacts": matched_contacts,
         "matched_other_users": matched_other_users
     }
+
+@app.get("/getContactInfo/{user_id}/{nickname}")
+def getContactInfo(user_id: str, nickname: str, db: Session = Depends(get_db)):
+    current_user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not current_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user = db.query(UserDB).filter(UserDB.nickname == nickname).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"name": user.name, "surname": user.surname}
