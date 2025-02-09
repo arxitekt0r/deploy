@@ -247,33 +247,41 @@ def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)
 
     # Load contacts from the JSON field (list of nicknames)
     try:
-        contacts_list = json.loads(current_user.contacts)
+        contacts_list = json.loads(current_user.contacts)  # Assuming contacts store nicknames
     except json.JSONDecodeError:
         contacts_list = []
 
-    # Filter contacts whose nicknames contain the search string (case-insensitive)
+    # Query database to get full details of matched contacts
+    matched_contacts_query = db.query(UserDB.nickname, UserDB.name, UserDB.surname).filter(
+        UserDB.nickname.in_(contacts_list),
+        UserDB.nickname.ilike(f"%{search_string}%")  # Search for substring match
+    )
     matched_contacts = [
-        contact for contact in contacts_list
-        if search_string.lower() in contact.lower()
+        {"nickname": user.nickname, "name": user.name, "surname": user.surname}
+        for user in matched_contacts_query.all()
     ]
 
     # Query for other users whose nickname starts with the search string (case-insensitive)
-    # and who are not the current user and not already in contacts.
-    other_users_query = db.query(UserDB.nickname).filter(  # Select only nickname
+    other_users_query = db.query(UserDB.nickname, UserDB.name, UserDB.surname).filter(
         UserDB.nickname.ilike(f"{search_string}%"),
         UserDB.id != user_id
     )
-    # Exclude users that are already in the contacts list.
+
+    # Exclude users that are already in the contacts list
     if contacts_list:
         other_users_query = other_users_query.filter(~UserDB.nickname.in_(contacts_list))
 
-    # Extract nicknames only
-    matched_other_users = [user.nickname for user in other_users_query.all()]
+    # Extract required fields (nickname, name, surname)
+    matched_other_users = [
+        {"nickname": user.nickname, "name": user.name, "surname": user.surname}
+        for user in other_users_query.all()
+    ]
 
     return {
-        "matched_contacts": matched_contacts,
-        "matched_other_users": matched_other_users  # Now returns only nicknames
+        "matched_contacts": matched_contacts,       # Now contains full details
+        "matched_other_users": matched_other_users  # Also contains full details
     }
+
 
 
 @app.get("/getContactInfo/{user_id}/{nickname}")
