@@ -1,6 +1,4 @@
-
 import random
-
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import Column, Integer, String, Date, create_engine, LargeBinary
