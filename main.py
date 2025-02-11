@@ -235,6 +235,39 @@ def send_message(user_id: str, contact_nickname: str, message: Message, db: Sess
 
     return {"message": "Message sent successfully"}
 
+class EditProfileRequest(BaseModel):
+    name: str | None = None
+    surname: str | None = None
+    nickname: str | None = None
+
+@app.put("/edit_profile/{user_id}")
+def edit_profile(
+    user_id: str,
+    profile_data: EditProfileRequest,  # Accept JSON data using Pydantic model
+    db: Session = Depends(get_db)
+):
+    # Fetch the user from the database
+    user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Check if the new nickname is unique
+    if profile_data.nickname and profile_data.nickname != user.nickname:
+        existing_user = db.query(UserDB).filter(UserDB.nickname == profile_data.nickname).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Nickname already in use")
+        user.nickname = profile_data.nickname
+
+    # Update other fields if provided
+    if profile_data.name is not None:
+        user.name = profile_data.name
+    if profile_data.surname is not None:  # Allows setting surname to an empty string
+        user.surname = profile_data.surname
+
+    db.commit()
+    db.refresh(user)
+    return {"message": "Profile updated successfully", "updated_user": user}
+
 
 @app.get("/profile_info/{user_id}")
 def get_profile_info(user_id: str, db: Session = Depends(get_db)):
