@@ -165,8 +165,15 @@ def delete_user(user_id: str, db: Session = Depends(get_db)):
     return {"message": "User deleted successfully"}
 
 
-@app.post("/addcontact/{user_id}/{contact_nickname}")
-def add_contact(user_id: str, contact_nickname: str, db: Session = Depends(get_db)):
+class AddContactRequest(BaseModel):
+    user_id: str
+    contact_nickname: str
+
+@app.post("/addcontact/")
+def add_contact(request: AddContactRequest, db: Session = Depends(get_db)):
+    user_id = request.user_id
+    contact_nickname = request.contact_nickname
+    
     # Find the user adding the contact
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not user:
@@ -197,7 +204,6 @@ def add_contact(user_id: str, contact_nickname: str, db: Session = Depends(get_d
     db.commit()
 
     return {"message": "Contact added successfully to both users"}
-
 
 @app.post("/sendMessage/{user_id}/{contact_nickname}")
 def send_message(user_id: str, contact_nickname: str, message: Message, db: Session = Depends(get_db)):
