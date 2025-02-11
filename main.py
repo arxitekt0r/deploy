@@ -1,17 +1,20 @@
 
 import random
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import Column, Integer, String, Date, create_engine
+from sqlalchemy import Column, Integer, String, Date, create_engine, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from passlib.context import CryptContext
+from PIL import Image
 import uuid
 from datetime import date
 import smtplib
 import json
 import os
+import io
+import base64
 
 from dotenv import load_dotenv
 
@@ -45,7 +48,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 encryptor = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# Database Model
 class UserDB(Base):
     __tablename__ = "users"
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
@@ -56,7 +58,7 @@ class UserDB(Base):
     date_of_birth = Column(Date, nullable=False)
     hashed_password = Column(String, nullable=False)
     contacts = Column(String, nullable=False, default="[]")  # Store contacts as JSON
-
+    profile_photo = Column(LargeBinary, nullable=True)  # Store image in binary format
 
 # Pydantic Model for Request/Response
 class UserCreate(BaseModel):
@@ -241,41 +243,62 @@ class EditProfileRequest(BaseModel):
     nickname: str | None = None
 
 @app.put("/edit_profile/{user_id}")
-def edit_profile(
+async def edit_profile(
     user_id: str,
-    profile_data: EditProfileRequest,  # Accept JSON data using Pydantic model
-    db: Session = Depends(get_db)
+    name: str | None = None,
+    surname: str | None = None,
+    nickname: str | None = None,
+    profile_photo: UploadFile = File(None),
+    db: Session = Depends(get_db),
 ):
-    # Fetch the user from the database
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Check if the new nickname is unique
-    if profile_data.nickname and profile_data.nickname != user.nickname:
-        existing_user = db.query(UserDB).filter(UserDB.nickname == profile_data.nickname).first()
+    # Handle nickname change
+    if nickname and nickname != user.nickname:
+        existing_user = db.query(UserDB).filter(UserDB.nickname == nickname).first()
         if existing_user:
             raise HTTPException(status_code=400, detail="Nickname already in use")
-        user.nickname = profile_data.nickname
+        user.nickname = nickname
 
-    # Update other fields if provided
-    if profile_data.name is not None:
-        user.name = profile_data.name
-    if profile_data.surname is not None:  # Allows setting surname to an empty string
-        user.surname = profile_data.surname
+    # Update other fields
+    if name:
+        user.name = name
+    if surname is not None:
+        user.surname = surname
+
+    # Handle profile photo
+    if profile_photo:
+        image = Image.open(profile_photo.file)
+        image = image.convert("RGB")  # Ensure it's in RGB format
+        img_bytes = io.BytesIO()
+        image.save(img_bytes, format="JPEG")
+        user.profile_photo = img_bytes.getvalue()
 
     db.commit()
     db.refresh(user)
-    return {"message": "Profile updated successfully", "updated_user": user}
-
+    return {"message": "Profile updated successfully"}
 
 @app.get("/profile_info/{user_id}")
 def get_profile_info(user_id: str, db: Session = Depends(get_db)):
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
 
+    profile_photo_base64 = None
+    if user.profile_photo:
+        profile_photo_base64 = base64.b64encode(user.profile_photo).decode("utf-8")
+
+    return {
+        "id": user.id,
+        "name": user.name,
+        "surname": user.surname,
+        "nickname": user.nickname,
+        "email": user.email,
+        "date_of_birth": user.date_of_birth,
+        "profile_photo": profile_photo_base64  # Return Base64 encoded photo
+    }
 
 @app.get("/search/{user_id}/{search_string}")
 def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)):
@@ -333,7 +356,16 @@ def get_contact_info(user_id: str, nickname: str, db: Session = Depends(get_db))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return {"name": user.name, "surname": user.surname, "nickname": user.nickname}
+    profile_photo_base64 = None
+    if user.profile_photo:
+        profile_photo_base64 = base64.b64encode(user.profile_photo).decode("utf-8")
+
+    return {
+        "name": user.name,
+        "surname": user.surname,
+        "nickname": user.nickname,
+        "profile_photo": profile_photo_base64
+    }
 
 
 @app.get("/getMessageHistory/{user_id}/{contact_nickname}")
