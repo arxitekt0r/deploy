@@ -288,6 +288,19 @@ def get_profile_info(user_id: str, db: Session = Depends(get_db)):
     if user.profile_photo:
         profile_photo_base64 = base64.b64encode(user.profile_photo).decode("utf-8")
 
+    # Load contacts from the JSON field
+    try:
+        contacts_list = json.loads(user.contacts)  # List of nicknames
+    except json.JSONDecodeError:
+        contacts_list = []
+
+    # Retrieve full contact details
+    contacts_query = db.query(UserDB.nickname, UserDB.name, UserDB.surname).filter(UserDB.nickname.in_(contacts_list))
+    contacts = [
+        {"nickname": contact.nickname, "name": contact.name, "surname": contact.surname}
+        for contact in contacts_query.all()
+    ]
+
     return {
         "id": user.id,
         "name": user.name,
@@ -295,8 +308,10 @@ def get_profile_info(user_id: str, db: Session = Depends(get_db)):
         "nickname": user.nickname,
         "email": user.email,
         "date_of_birth": user.date_of_birth,
-        "profile_photo": profile_photo_base64  # Return Base64 encoded photo
+        "profile_photo": profile_photo_base64,  # Return Base64 encoded photo
+        "contacts": contacts  # List of contacts with details
     }
+
 
 @app.get("/search/{user_id}/{search_string}")
 def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)):
