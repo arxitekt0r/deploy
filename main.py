@@ -326,18 +326,27 @@ def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)
     except json.JSONDecodeError:
         contacts_list = []
 
+    def serialize_user(user):
+        """Helper function to serialize user data including profile photo"""
+        profile_photo_base64 = None
+        if user.profile_photo:
+            profile_photo_base64 = base64.b64encode(user.profile_photo).decode("utf-8")
+        return {
+            "nickname": user.nickname,
+            "name": user.name,
+            "surname": user.surname,
+            "profile_photo": profile_photo_base64
+        }
+
     # Query database to get full details of matched contacts
-    matched_contacts_query = db.query(UserDB.nickname, UserDB.name, UserDB.surname).filter(
+    matched_contacts_query = db.query(UserDB).filter(
         UserDB.nickname.in_(contacts_list),
         UserDB.nickname.ilike(f"%{search_string}%")  # Search for substring match
     )
-    matched_contacts = [
-        {"nickname": user.nickname, "name": user.name, "surname": user.surname}
-        for user in matched_contacts_query.all()
-    ]
+    matched_contacts = [serialize_user(user) for user in matched_contacts_query.all()]
 
     # Query for other users whose nickname starts with the search string (case-insensitive)
-    other_users_query = db.query(UserDB.nickname, UserDB.name, UserDB.surname).filter(
+    other_users_query = db.query(UserDB).filter(
         UserDB.nickname.ilike(f"{search_string}%"),
         UserDB.id != user_id
     )
@@ -346,17 +355,12 @@ def search_users(user_id: str, search_string: str, db: Session = Depends(get_db)
     if contacts_list:
         other_users_query = other_users_query.filter(~UserDB.nickname.in_(contacts_list))
 
-    # Extract required fields (nickname, name, surname)
-    matched_other_users = [
-        {"nickname": user.nickname, "name": user.name, "surname": user.surname}
-        for user in other_users_query.all()
-    ]
+    matched_other_users = [serialize_user(user) for user in other_users_query.all()]
 
     return {
-        "matched_contacts": matched_contacts,       # Now contains full details
-        "matched_other_users": matched_other_users  # Also contains full details
+        "matched_contacts": matched_contacts,       # Now contains profile_photo
+        "matched_other_users": matched_other_users  # Now contains profile_photo
     }
-
 
 
 @app.get("/getContactInfo/{user_id}/{nickname}")
