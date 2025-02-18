@@ -178,7 +178,7 @@ def verify_user(verify_data: VerifyUser, db: Session = Depends(get_db)):
     # Remove from verification DB after successful verification
     del verification_db[user_id]
 
-    return {"message": "Verification successful, account created!"}
+    return {"message": "Verification successful"}
 
 @app.delete("/delete/{user_id}")
 def delete_user(user_id: str, db: Session = Depends(get_db)):
