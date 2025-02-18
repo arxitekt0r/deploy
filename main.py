@@ -109,29 +109,33 @@ class Message(BaseModel):
 Base.metadata.create_all(bind=engine)
 
 
+pending_users = {}
+
 @app.post("/register/")
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    if db.query(UserDB).filter(UserDB.nickname == user.nickname).first():
+def request_verification(user: UserCreate):
+    if user.nickname in [u["nickname"] for u in pending_users.values()]:
         raise HTTPException(status_code=400, detail="Nickname already in use")
-    if db.query(UserDB).filter(UserDB.email == user.email).first():
+    if user.email in [u["email"] for u in pending_users.values()]:
         raise HTTPException(status_code=400, detail="Email already in use")
 
-    hashed_password = encryptor.hash(user.password)
-    new_user = UserDB(
-        name=user.name,
-        surname=user.surname,
-        nickname=user.nickname,
-        email=user.email,
-        date_of_birth=user.date_of_birth,
-        hashed_password=hashed_password,
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    verification_code = random.randint(100000, 999999)
+    user_id = str(uuid.uuid4())  # Generate a temporary user ID
 
-    verification_db[new_user.id] = random.randint(100000, 999999)
-    send_verification_code(new_user.email, verification_db[new_user.id])
-    return {"user_id": new_user.id}
+    # Store user data temporarily
+    pending_users[user_id] = {
+        "name": user.name,
+        "surname": user.surname,
+        "nickname": user.nickname,
+        "email": user.email,
+        "date_of_birth": str(user.date_of_birth),  # Convert date to string for storage
+        "password": encryptor.hash(user.password),
+    }
+
+    # Store verification code
+    verification_db[user_id] = verification_code
+    send_verification_code(user.email, verification_code)
+
+    return {"message": "Verification code sent. Please verify to complete registration.", "user_id": user_id}
 
 
 @app.post("/login/")
@@ -144,15 +148,37 @@ def login_user(user: UserLogin, db: Session = Depends(get_db)):
 
 
 @app.post("/verify/")
-def verify_user(verify_data: VerifyUser):
-    if verify_data.user_id not in verification_db:
-        raise HTTPException(status_code=400, detail="Invalid user ID")
-    if verification_db[verify_data.user_id] != verify_data.verification_code:
+def verify_user(verify_data: VerifyUser, db: Session = Depends(get_db)):
+    user_id = verify_data.user_id
+
+    if user_id not in verification_db:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification request")
+    if verification_db[user_id] != verify_data.verification_code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
-    del verification_db[verify_data.user_id]
-    return {"message": "Verification successful"}
+    # Retrieve user data from temporary storage
+    user_data = pending_users.pop(user_id, None)
+    if not user_data:
+        raise HTTPException(status_code=400, detail="User data not found")
 
+    # Create and save the user in the database
+    new_user = UserDB(
+        id=user_id,
+        name=user_data["name"],
+        surname=user_data["surname"],
+        nickname=user_data["nickname"],
+        email=user_data["email"],
+        date_of_birth=date.fromisoformat(user_data["date_of_birth"]),
+        hashed_password=user_data["password"],
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    # Remove from verification DB after successful verification
+    del verification_db[user_id]
+
+    return {"message": "Verification successful, account created!"}
 
 @app.delete("/delete/{user_id}")
 def delete_user(user_id: str, db: Session = Depends(get_db)):
