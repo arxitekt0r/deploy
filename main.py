@@ -23,7 +23,17 @@ smtp_port = 587
 sender_email = os.getenv("SENDER_EMAIL")
 password = os.getenv("SENDER_PASSWORD")
 
+pending_users = {}
 verification_db = {}
+
+
+app = FastAPI()
+Base = declarative_base()
+DATABASE_URL = "sqlite:///./users.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+encryptor = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def send_verification_code(email: str, code: int) -> None:
@@ -36,14 +46,6 @@ def send_verification_code(email: str, code: int) -> None:
     except Exception as e:
         print("Error:", e)
 
-
-app = FastAPI()
-Base = declarative_base()
-DATABASE_URL = "sqlite:///./users.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-encryptor = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class UserDB(Base):
@@ -108,8 +110,14 @@ class Message(BaseModel):
 # Create tables
 Base.metadata.create_all(bind=engine)
 
+def cleanup_expired_pending_users(expiration_seconds=3600):  # 1-hour expiration
+    current_time = time.time()
+    expired_users = [uid for uid, data in pending_users.items() if current_time - data["timestamp"] > expiration_seconds]
 
-pending_users = {}
+    for uid in expired_users:
+        pending_users.pop(uid, None)
+        verification_db.pop(uid, None)
+
 
 @app.post("/register/")
 def request_verification(user: UserCreate, db: Session = Depends(get_db)):
