@@ -8,12 +8,12 @@ from passlib.context import CryptContext
 from PIL import Image
 import uuid
 from datetime import date
+import time
 import smtplib
 import json
 import os
 import io
 import base64
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -112,14 +112,27 @@ Base.metadata.create_all(bind=engine)
 pending_users = {}
 
 @app.post("/register/")
-def request_verification(user: UserCreate):
-    if user.nickname in [u["nickname"] for u in pending_users.values()]:
-        raise HTTPException(status_code=400, detail="Nickname already in use")
-    if user.email in [u["email"] for u in pending_users.values()]:
-        raise HTTPException(status_code=400, detail="Email already in use")
+def request_verification(user: UserCreate, db: Session = Depends(get_db)):
+    cleanup_expired_pending_users()  # Clean up old unverified users
 
+    # Check if nickname is pending but expired
+    for uid, data in pending_users.items():
+        if data["nickname"] == user.nickname:
+            del pending_users[uid]
+            del verification_db[uid]
+            break
+
+    # Check if user exists in the database
+    existing_user = db.query(UserDB).filter(
+        (UserDB.nickname == user.nickname) | (UserDB.email == user.email)
+    ).first()
+    
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Nickname or email already in use")
+
+    # Generate verification code and user ID
     verification_code = random.randint(100000, 999999)
-    user_id = str(uuid.uuid4())  # Generate a temporary user ID
+    user_id = str(uuid.uuid4())
 
     # Store user data temporarily
     pending_users[user_id] = {
@@ -127,8 +140,9 @@ def request_verification(user: UserCreate):
         "surname": user.surname,
         "nickname": user.nickname,
         "email": user.email,
-        "date_of_birth": str(user.date_of_birth),  # Convert date to string for storage
+        "date_of_birth": str(user.date_of_birth),
         "password": encryptor.hash(user.password),
+        "timestamp": time.time()  # Store registration time
     }
 
     # Store verification code
@@ -136,7 +150,6 @@ def request_verification(user: UserCreate):
     send_verification_code(user.email, verification_code)
 
     return {"message": "Verification code sent. Please verify to complete registration.", "user_id": user_id}
-
 
 @app.post("/login/")
 def login_user(user: UserLogin, db: Session = Depends(get_db)):
@@ -156,12 +169,12 @@ def verify_user(verify_data: VerifyUser, db: Session = Depends(get_db)):
     if verification_db[user_id] != verify_data.verification_code:
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
-    # Retrieve user data from temporary storage
+    # Retrieve user data from pending storage
     user_data = pending_users.pop(user_id, None)
     if not user_data:
         raise HTTPException(status_code=400, detail="User data not found")
 
-    # Create and save the user in the database
+    # Create and save user in the database
     new_user = UserDB(
         id=user_id,
         name=user_data["name"],
@@ -179,6 +192,7 @@ def verify_user(verify_data: VerifyUser, db: Session = Depends(get_db)):
     del verification_db[user_id]
 
     return {"message": "Verification successful"}
+
 
 @app.delete("/delete/{user_id}")
 def delete_user(user_id: str, db: Session = Depends(get_db)):
