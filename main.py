@@ -458,3 +458,11 @@ def get_message_history(user_id: str, contact_nickname: str, db: Session = Depen
         conversation = []
 
     return {"conversation": conversation}
+
+@app.get("/check_nickname/{nickname}")
+def check_nickname(nickname: str, db: Session = Depends(get_db)):
+    existing_user = db.query(UserDB).filter(UserDB.nickname == nickname).first()
+    if existing_user:
+        return {"message": "Nickname already in use"}
+    return {"message": "Nickname is free"}
+
