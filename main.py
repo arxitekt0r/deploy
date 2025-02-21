@@ -309,9 +309,9 @@ async def edit_profile(
         user.nickname = nickname
 
     # Update other fields
-    if name:
+    if name and name != user.name:
         user.name = name
-    if surname is not None:
+    if surname is not None and surname != user.surname:
         user.surname = surname
 
     # Handle profile photo
@@ -322,9 +322,22 @@ async def edit_profile(
         image.save(img_bytes, format="JPEG")
         user.profile_photo = img_bytes.getvalue()
 
+    # Commit changes and refresh the user object
     db.commit()
     db.refresh(user)
-    return {"message": "Profile updated successfully"}
+
+    return {
+        "message": "Profile updated successfully",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "surname": user.surname,
+            "nickname": user.nickname,
+            "email": user.email,
+            "date_of_birth": user.date_of_birth,
+            "profile_photo": user.profile_photo,  # You might want to handle this properly if needed
+        }
+    }
 
 @app.get("/profile_info/{user_id}")
 def get_profile_info(user_id: str, db: Session = Depends(get_db)):
