@@ -13,6 +13,7 @@ import smtplib
 import json
 import os
 import io
+from typing import Optional
 import base64
 from dotenv import load_dotenv
 
@@ -283,18 +284,16 @@ def send_message(user_id: str, contact_nickname: str, message: Message, db: Sess
 
     return {"message": "Message sent successfully"}
 
-class EditProfileRequest(BaseModel):
-    name: str | None = None
-    surname: str | None = None
-    nickname: str | None = None
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    nickname: Optional[str] = None
+    profile_photo: Optional[str] = None  # Base64 string
 
 @app.put("/edit_profile/{user_id}")
 async def edit_profile(
     user_id: str,
-    name: str | None = None,
-    surname: str | None = None,
-    nickname: str | None = None,
-    profile_photo: UploadFile = File(None),
+    update_data: ProfileUpdate,
     db: Session = Depends(get_db),
 ):
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
@@ -302,42 +301,34 @@ async def edit_profile(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Handle nickname change
-    if nickname and nickname != user.nickname:
-        existing_user = db.query(UserDB).filter(UserDB.nickname == nickname).first()
+    if update_data.nickname and update_data.nickname != user.nickname:
+        existing_user = db.query(UserDB).filter(UserDB.nickname == update_data.nickname).first()
         if existing_user:
             raise HTTPException(status_code=400, detail="Nickname already in use")
-        user.nickname = nickname
+        user.nickname = update_data.nickname
 
     # Update other fields
-    if name and name != user.name:
-        user.name = name
-    if surname is not None and surname != user.surname:
-        user.surname = surname
+    if update_data.name and update_data.name != user.name:
+        user.name = update_data.name
+    if update_data.surname is not None and update_data.surname != user.surname:
+        user.surname = update_data.surname
 
     # Handle profile photo
-    if profile_photo:
-        image = Image.open(profile_photo.file)
-        image = image.convert("RGB")  # Ensure it's in RGB format
-        img_bytes = io.BytesIO()
-        image.save(img_bytes, format="JPEG")
-        user.profile_photo = img_bytes.getvalue()
+    if update_data.profile_photo:
+        try:
+            img_data = base64.b64decode(update_data.profile_photo)
+            image = Image.open(io.BytesIO(img_data))
+            image = image.convert("RGB")
+            img_bytes_io = io.BytesIO()
+            image.save(img_bytes_io, format="JPEG")
+            user.profile_photo = img_bytes_io.getvalue()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid image data: {str(e)}")
 
-    # Commit changes and refresh the user object
     db.commit()
     db.refresh(user)
 
-    return {
-        "message": "Profile updated successfully",
-        "user": {
-            "id": user.id,
-            "name": user.name,
-            "surname": user.surname,
-            "nickname": user.nickname,
-            "email": user.email,
-            "date_of_birth": user.date_of_birth,
-            "profile_photo": user.profile_photo,  # You might want to handle this properly if needed
-        }
-    }
+    return {"message": "Profile updated successfully", "user": user}
 
 @app.get("/profile_info/{user_id}")
 def get_profile_info(user_id: str, db: Session = Depends(get_db)):
