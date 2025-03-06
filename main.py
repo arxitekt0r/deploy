@@ -1,5 +1,5 @@
 import random
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import Column, Integer, String, Date, create_engine, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
@@ -13,7 +13,7 @@ import smtplib
 import json
 import os
 import io
-from typing import Optional
+from typing import Optional, Dict, List
 import base64
 from dotenv import load_dotenv
 
@@ -29,6 +29,10 @@ verification_db = {}
 
 
 app = FastAPI()
+
+
+
+
 Base = declarative_base()
 DATABASE_URL = "sqlite:///./users.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -60,6 +64,16 @@ class UserDB(Base):
     hashed_password = Column(String, nullable=False)
     contacts = Column(String, nullable=False, default="[]")  # Store contacts as JSON
     profile_photo = Column(LargeBinary, nullable=True)  # Store image in binary format
+
+
+class MessageDB(Base):
+    __tablename__ = "messages"
+    id = Column(Integer, primary_key=True, index=True)
+    sender = Column(String, nullable=False)
+    recipient = Column(String, nullable=False)
+    text = Column(String, nullable=False)
+    timestamp = Column(String, nullable=False, default=str(time.time()))
+
 
 # Pydantic Model for Request/Response
 class UserCreate(BaseModel):
@@ -118,6 +132,55 @@ def cleanup_expired_pending_users(expiration_seconds=3600):  # 1-hour expiration
     for uid in expired_users:
         pending_users.pop(uid, None)
         verification_db.pop(uid, None)
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+        self.message_storage = {}  # Store undelivered messages
+
+    async def connect(self, username: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[username] = websocket
+
+        # Deliver any stored messages
+        if username in self.message_storage:
+            for message in self.message_storage[username]:
+                await websocket.send_json(message)
+            del self.message_storage[username]
+
+    def disconnect(self, username: str):
+        if username in self.active_connections:
+            del self.active_connections[username]
+
+    async def send_message(self, recipient: str, message: dict):
+        if recipient in self.active_connections:
+            await self.active_connections[recipient].send_json(message)
+        else:
+            # Store undelivered message
+            if recipient not in self.message_storage:
+                self.message_storage[recipient] = []
+            self.message_storage[recipient].append(message)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/{username}")
+async def websocket_endpoint(username: str, websocket: WebSocket, db: Session = Depends(get_db)):
+    await manager.connect(username, websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            recipient = data["recipient"]
+            message = {"sender": username, "message": data["message"], "timestamp": str(time.time())}
+            
+            # Save message in DB
+            db_message = MessageDB(sender=username, recipient=recipient, text=data["message"])
+            db.add(db_message)
+            db.commit()
+
+            await manager.send_message(recipient, message)
+    except WebSocketDisconnect:
+        manager.disconnect(username)
 
 
 @app.post("/register/")
@@ -253,36 +316,6 @@ def add_contact(request: AddContactRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Contact added successfully to both users"}
-
-@app.post("/sendMessage/{user_id}/{contact_nickname}")
-def send_message(user_id: str, contact_nickname: str, message: Message, db: Session = Depends(get_db)):
-    user = db.query(UserDB).filter(UserDB.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    contacts = json.loads(user.contacts)
-    if contact_nickname not in contacts:
-        raise HTTPException(status_code=400, detail="Contact not found")
-
-    a, b = sorted([user.nickname, contact_nickname])
-
-    file_path = f"conversations/{a}_{b}.json"
-    os.makedirs("conversations", exist_ok=True)
-
-    conversation = []
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
-            conversation = json.load(f)
-
-    conversation.append({
-        "sender": message.sender,
-        "text": message.text,
-        "send_date": message.send_date.isoformat()
-    })
-
-    with open(file_path, "w") as f:
-        json.dump(conversation, f, indent=4)
-
-    return {"message": "Message sent successfully"}
 
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
@@ -469,4 +502,6 @@ def check_nickname(nickname: str, db: Session = Depends(get_db)):
     if existing_user:
         return {"message": "Nickname already in use"}
     return {"message": "Nickname is free"}
+
+
 
