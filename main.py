@@ -171,17 +171,27 @@ async def websocket_endpoint(username: str, websocket: WebSocket, db: Session = 
         while True:
             data = await websocket.receive_json()
             recipient = data["recipient"]
-            message = {"sender": username, "message": data["message"], "timestamp": str(time.time())}
-            
+            message_text = data["message"]
+            timestamp = str(time.time())
+
             # Save message in DB
-            db_message = MessageDB(sender=username, recipient=recipient, text=data["message"])
+            db_message = MessageDB(sender=username, recipient=recipient, text=message_text, timestamp=timestamp)
             db.add(db_message)
             db.commit()
 
+            # Construct the message payload
+            message = {
+                "sender": username,
+                "recipient": recipient,
+                "message": message_text,
+                "timestamp": timestamp
+            }
+
+            # Send the message
             await manager.send_message(recipient, message)
+
     except WebSocketDisconnect:
         manager.disconnect(username)
-
 
 @app.post("/register/")
 def request_verification(user: UserCreate, db: Session = Depends(get_db)):
@@ -472,29 +482,23 @@ def get_contact_info(user_id: str, nickname: str, db: Session = Depends(get_db))
 
 @app.get("/getMessageHistory/{user_id}/{contact_nickname}")
 def get_message_history(user_id: str, contact_nickname: str, db: Session = Depends(get_db)):
-    # Retrieve the current user from the database
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    try:
-        contacts_list = json.loads(user.contacts)
-    except json.JSONDecodeError:
-        contacts_list = []
-    if contact_nickname not in contacts_list:
-        raise HTTPException(status_code=400, detail="Contact not found in your contacts")
+    # Retrieve messages between the user and the contact
+    messages = db.query(MessageDB).filter(
+        ((MessageDB.sender == user.nickname) & (MessageDB.recipient == contact_nickname)) |
+        ((MessageDB.sender == contact_nickname) & (MessageDB.recipient == user.nickname))
+    ).order_by(MessageDB.timestamp).all()
 
-    a, b = sorted([user.nickname, contact_nickname])
-    file_path = f"conversations/{a}_{b}.json"
-    os.makedirs("conversations", exist_ok=True)
+    # Serialize messages
+    return [
+        {"sender": msg.sender, "recipient": msg.recipient, "message": msg.text, "timestamp": msg.timestamp}
+        for msg in messages
+    ]
 
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
-            conversation = json.load(f)
-    else:
-        conversation = []
 
-    return {"conversation": conversation}
 
 @app.get("/check_nickname/{nickname}")
 def check_nickname(nickname: str, db: Session = Depends(get_db)):
